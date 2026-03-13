@@ -8,7 +8,9 @@ import {
   Plus, 
   Edit, 
   Trash2,
-  Dumbbell
+  Dumbbell,
+  Link2,
+  Unlink
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { localApi } from "@/api/localApiClient";
+import { useAuth } from "@/lib/AuthContext";
 
 export default function StudentWorkouts() {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -26,9 +29,12 @@ export default function StudentWorkouts() {
     description: "",
     color: "bg-blue-500"
   });
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [assignmentError, setAssignmentError] = useState("");
 
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   // Get student info from URL
   const urlParams = new URLSearchParams(window.location.search);
@@ -39,6 +45,18 @@ export default function StudentWorkouts() {
     queryKey: ['student-workouts', studentId],
     queryFn: () => localApi.getWorkouts({ student_id: studentId }),
     enabled: !!studentId
+  });
+
+  const { data: templates = [] } = useQuery({
+    queryKey: ["workout-templates"],
+    queryFn: () => localApi.getWorkoutTemplates(),
+    enabled: !!studentId,
+  });
+
+  const { data: assignments = [] } = useQuery({
+    queryKey: ["student-template-assignments", studentId],
+    queryFn: () => localApi.getStudentTemplateAssignments(studentId),
+    enabled: !!studentId,
   });
 
   const createMutation = useMutation({
@@ -62,6 +80,26 @@ export default function StudentWorkouts() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['student-workouts'] });
     }
+  });
+
+  const assignTemplateMutation = useMutation({
+    mutationFn: (templateId) => localApi.assignWorkoutTemplate(studentId, templateId, user),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["student-template-assignments", studentId] });
+      queryClient.invalidateQueries({ queryKey: ["student-workouts", studentId] });
+      setSelectedTemplateId("");
+      setAssignmentError("");
+    },
+    onError: (err) => setAssignmentError(err?.message ?? "Erro ao atribuir template."),
+  });
+
+  const removeAssignmentMutation = useMutation({
+    mutationFn: (assignmentId) => localApi.removeStudentTemplateAssignment(studentId, assignmentId, user),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["student-template-assignments", studentId] });
+      queryClient.invalidateQueries({ queryKey: ["student-workouts", studentId] });
+    },
+    onError: (err) => setAssignmentError(err?.message ?? "Erro ao remover template."),
   });
 
   const handleOpenDialog = (workout = null) => {
@@ -104,6 +142,9 @@ export default function StudentWorkouts() {
     { value: "bg-pink-500", label: "Rosa" }
   ];
 
+  const assignableTemplates = templates.filter((template) => !assignments.some((a) => a.template_id === template.id));
+  const regularWorkouts = workouts.filter((w) => !w.is_template_assignment);
+
   return (
     <div className="min-h-screen bg-zinc-950 text-white pb-24">
       {/* Header */}
@@ -117,7 +158,7 @@ export default function StudentWorkouts() {
             </Link>
             <div>
               <h1 className="text-xl font-bold">Treinos - {studentName}</h1>
-              <p className="text-sm text-zinc-500">{workouts.length} treinos cadastrados</p>
+              <p className="text-sm text-zinc-500">{regularWorkouts.length} treinos cadastrados</p>
             </div>
           </div>
           <Button
@@ -132,9 +173,65 @@ export default function StudentWorkouts() {
 
       {/* Workouts List */}
       <div className="px-4 py-6">
+        <div className="bg-zinc-900/50 rounded-xl border border-zinc-800 p-4 mb-5">
+          <h3 className="font-semibold mb-2">Templates atribuídos</h3>
+          <p className="text-sm text-zinc-500 mb-3">
+            Vínculo direto: alterações no template refletem para este aluno.
+          </p>
+
+          {assignmentError && <p className="text-sm text-red-400 mb-3">{assignmentError}</p>}
+
+          <div className="flex flex-col md:flex-row gap-2 mb-3">
+            <select
+              value={selectedTemplateId}
+              onChange={(e) => setSelectedTemplateId(e.target.value)}
+              className="flex-1 h-10 rounded-md bg-zinc-800 border border-zinc-700 px-3 text-sm"
+            >
+              <option value="">Selecione um template para atribuir</option>
+              {assignableTemplates.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} ({t.short_name || "TMP"})
+                </option>
+              ))}
+            </select>
+            <Button
+              onClick={() => assignTemplateMutation.mutate(selectedTemplateId)}
+              disabled={!selectedTemplateId || assignTemplateMutation.isPending}
+              className="bg-yellow-500 hover:bg-yellow-600 text-black"
+            >
+              <Link2 className="w-4 h-4 mr-2" />
+              Atribuir template
+            </Button>
+          </div>
+
+          {assignments.length === 0 ? (
+            <p className="text-sm text-zinc-500">Nenhum template vinculado.</p>
+          ) : (
+            <div className="space-y-2">
+              {assignments.map((a) => (
+                <div key={a.id} className="bg-zinc-800/60 rounded-lg p-3 flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">{a.template_name}</p>
+                    <p className="text-xs text-zinc-500">{a.template_short_name || "Template"}</p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removeAssignmentMutation.mutate(a.id)}
+                    className="text-zinc-400 hover:text-red-400"
+                  >
+                    <Unlink className="w-4 h-4 mr-2" />
+                    Remover
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {isLoading ? (
           <div className="text-center py-12 text-zinc-500">Carregando...</div>
-        ) : workouts.length === 0 ? (
+        ) : regularWorkouts.length === 0 ? (
           <div className="bg-zinc-900/50 rounded-2xl border border-zinc-800 p-12 text-center">
             <Dumbbell className="w-16 h-16 text-zinc-700 mx-auto mb-4" />
             <h3 className="text-lg font-semibold mb-2">Nenhum treino cadastrado</h3>
@@ -149,7 +246,7 @@ export default function StudentWorkouts() {
           </div>
         ) : (
           <div className="grid gap-4">
-            {workouts.map((workout, index) => (
+            {regularWorkouts.map((workout, index) => (
               <motion.div
                 key={workout.id}
                 initial={{ opacity: 0, y: 20 }}

@@ -1,39 +1,47 @@
-**Welcome to your Base44 project** 
+# Olimpika
 
-**About**
+App web (Vite + React) + API Python (FastAPI + PostgreSQL).
 
-View and Edit  your app on [Base44.com](http://Base44.com) 
+## Pré-requisitos
 
-This project contains everything you need to run your app locally.
+- Node.js 18+
+- Python 3.10+
+- PostgreSQL (local ou hospedado, ex.: Render)
 
-**Edit the code in your local development environment**
+## Frontend
 
-Any change pushed to the repo will also be reflected in the Base44 Builder.
-
-**Prerequisites:** 
-
-1. Clone the repository using the project's Git URL 
-2. Navigate to the project directory
-3. Install dependencies: `npm install`
-4. Create an `.env.local` file and set the right environment variables
-
-```
-VITE_BASE44_APP_ID=your_app_id
-VITE_BASE44_APP_BASE_URL=your_backend_url
-
-e.g.
-VITE_BASE44_APP_ID=cbef744a8545c389ef439ea6
-VITE_BASE44_APP_BASE_URL=https://my-to-do-list-81bfaad7.base44.app
+```bash
+npm install
 ```
 
-Run the app: `npm run dev`
+Crie `.env.local` na raiz do projeto:
 
-**Publish your changes**
+```
+VITE_API_BASE_URL=http://localhost:4000
+```
 
-Open [Base44.com](http://Base44.com) and click on Publish.
+```bash
+npm run dev
+```
 
-**Docs & Support**
+## Backend (python-backend)
 
-Documentation: [https://docs.base44.com/Integrations/Using-GitHub](https://docs.base44.com/Integrations/Using-GitHub)
+```bash
+cd python-backend
+pip install -r requirements.txt
+```
 
-Support: [https://app.base44.com/support](https://app.base44.com/support)
+Configure `.env` em `python-backend/` com `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`.
+
+```bash
+python migration.py
+python seed.py
+uvicorn main:app --host 0.0.0.0 --port 4000
+```
+
+## Build de produção
+
+```bash
+npm run build
+npm run preview
+```

@@ -27,8 +27,8 @@ export default function Home() {
   useEffect(() => {
     if (!user) return;
 
-    // Redireciona personal para sua área
-    if (user.user_type === 'personal') {
+    // Redireciona personal/admin para sua área
+    if (user.user_type === 'personal' || user.user_type === 'admin') {
       navigate(createPageUrl('PersonalHome'), { replace: true });
     }
   }, [user, navigate]);

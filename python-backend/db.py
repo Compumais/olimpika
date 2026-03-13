@@ -7,9 +7,16 @@ from pathlib import Path
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-BASE_DIR = Path(__file__).resolve().parent
+# Carrega .env da pasta python-backend (e da raiz do projeto, se existir)
+try:
+    from dotenv import load_dotenv
+    BASE_DIR = Path(__file__).resolve().parent
+    load_dotenv(BASE_DIR / ".env")
+    load_dotenv(BASE_DIR.parent / ".env")
+except ImportError:
+    pass
 
-# Configuração do Postgres (mesmos valores do docker-compose por padrão)
+# Configuração do Postgres (variáveis de ambiente ou padrões do docker-compose)
 PG_CONFIG = {
     "host": os.environ.get("PGHOST", "localhost"),
     "port": int(os.environ.get("PGPORT", "5432")),
@@ -25,7 +32,7 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     full_name TEXT NOT NULL,
-    user_type TEXT NOT NULL CHECK(user_type IN ('aluno', 'personal')),
+    user_type TEXT NOT NULL CHECK(user_type IN ('aluno', 'personal', 'admin')),
     created_at TEXT
 );
 """
@@ -37,9 +44,9 @@ class SQLiteStyleCursor(RealDictCursor):
     convertendo para o formato do Postgres ("%s").
     """
 
-    def execute(self, query, vars=None):
+    def execute(self, query, params=None):
         query = query.replace("?", "%s")
-        super().execute(query, vars)
+        super().execute(query, params)
         return self
 
     def executemany(self, query, vars_list):
@@ -81,6 +88,5 @@ def with_connection():
         conn.close()
 
 
-# Inicializa o banco (tabela users) na importação do módulo
-init_db()
+# O schema (tabelas) é criado pelo migration.py. A API usa with_connection() ao receber requests.
 

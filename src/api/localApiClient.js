@@ -37,7 +37,12 @@ async function apiRequest(method, path, { params = {}, body } = {}) {
 const apiGet = (path, params) => apiRequest('GET', path, { params });
 const apiPost = (path, body) => apiRequest('POST', path, { body });
 const apiPut = (path, body) => apiRequest('PUT', path, { body });
-const apiDelete = (path) => apiRequest('DELETE', path);
+const apiDelete = (path, params) => apiRequest('DELETE', path, { params });
+
+const actorToPayload = (actor) => ({
+  actor_id: actor?.id,
+  actor_email: actor?.email,
+});
 
 function normalizeWorkoutSession(row) {
   const durationMinutes = row.duration_minutes;
@@ -138,6 +143,55 @@ export const localApi = {
 
   async deleteWorkout(id) {
     return apiDelete(`/workouts/${id}`);
+  },
+
+  // Workout templates ---------------------------------------------------------
+  async getWorkoutTemplates(params) {
+    return apiGet('/workout-templates', params ?? {});
+  },
+
+  async createWorkoutTemplate(data, actor) {
+    return apiPost('/workout-templates', { ...data, ...actorToPayload(actor) });
+  },
+
+  async updateWorkoutTemplate(id, data, actor) {
+    return apiPut(`/workout-templates/${id}`, { ...data, ...actorToPayload(actor) });
+  },
+
+  async deleteWorkoutTemplate(id, actor) {
+    return apiDelete(`/workout-templates/${id}`, actorToPayload(actor));
+  },
+
+  async getTemplateExercisesByTemplateId(templateId) {
+    return apiGet(`/workout-templates/${templateId}/exercises`);
+  },
+
+  async createTemplateExercise(templateId, data, actor) {
+    return apiPost(`/workout-templates/${templateId}/exercises`, { ...data, ...actorToPayload(actor) });
+  },
+
+  async updateTemplateExercise(templateId, exerciseId, data, actor) {
+    return apiPut(`/workout-templates/${templateId}/exercises/${exerciseId}`, { ...data, ...actorToPayload(actor) });
+  },
+
+  async deleteTemplateExercise(templateId, exerciseId, actor) {
+    return apiDelete(`/workout-templates/${templateId}/exercises/${exerciseId}`, actorToPayload(actor));
+  },
+
+  async assignWorkoutTemplate(studentId, templateId, actor, notes = '') {
+    return apiPost(`/students/${studentId}/template-assignments`, {
+      template_id: templateId,
+      notes,
+      ...actorToPayload(actor),
+    });
+  },
+
+  async getStudentTemplateAssignments(studentId) {
+    return apiGet(`/students/${studentId}/template-assignments`);
+  },
+
+  async removeStudentTemplateAssignment(studentId, assignmentId, actor) {
+    return apiDelete(`/students/${studentId}/template-assignments/${assignmentId}`, actorToPayload(actor));
   },
 
   // Exercises ----------------------------------------------------------------

@@ -11,7 +11,11 @@ export default function ListUsers() {
     queryFn: () => localApi.getUsers(),
   });
 
-  const typeLabel = (type) => (type === "personal" ? "Personal" : "Aluno");
+  const typeLabel = (type) => {
+    if (type === "admin") return "Admin";
+    if (type === "personal") return "Personal";
+    return "Aluno";
+  };
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white pb-24">
@@ -57,9 +61,11 @@ export default function ListUsers() {
                   </p>
                   <span
                     className={`inline-block mt-1 text-xs px-2 py-0.5 rounded-full ${
-                      u.user_type === "personal"
-                        ? "bg-yellow-500/20 text-yellow-400"
-                        : "bg-zinc-700 text-zinc-300"
+                      u.user_type === "admin"
+                        ? "bg-red-500/20 text-red-300"
+                        : u.user_type === "personal"
+                          ? "bg-yellow-500/20 text-yellow-400"
+                          : "bg-zinc-700 text-zinc-300"
                     }`}
                   >
                     {typeLabel(u.user_type)}

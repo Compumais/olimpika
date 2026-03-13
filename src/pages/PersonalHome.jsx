@@ -6,11 +6,11 @@ import { motion } from "framer-motion";
 import { 
   Dumbbell, 
   Users, 
-  Calendar,
   TrendingUp,
   Plus,
   Settings,
-  User
+  User,
+  LayoutTemplate
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import OlimpikaLogo from "@/components/OlimpikaLogo";
@@ -29,10 +29,15 @@ export default function PersonalHome() {
     queryFn: () => localApi.getTemplateExercises()
   });
 
+  const { data: workoutTemplates = [] } = useQuery({
+    queryKey: ['workout-templates'],
+    queryFn: () => localApi.getWorkoutTemplates(),
+  });
+
   const stats = [
     { label: "Treinos Criados", value: workouts.length, icon: Dumbbell, color: "yellow" },
     { label: "Exercícios", value: exercises.length, icon: TrendingUp, color: "blue" },
-    { label: "Alunos Ativos", value: "0", icon: Users, color: "green" }
+    { label: "Templates", value: workoutTemplates.length, icon: LayoutTemplate, color: "green" }
   ];
 
   return (
@@ -109,6 +114,24 @@ export default function PersonalHome() {
                 <div>
                   <h3 className="font-semibold">Biblioteca de Exercícios</h3>
                   <p className="text-sm text-zinc-500">{exercises.length} exercícios cadastrados</p>
+                </div>
+              </div>
+            </motion.div>
+          </Link>
+
+          <Link to={createPageUrl('WorkoutTemplates')}>
+            <motion.div
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              className="bg-zinc-900 rounded-xl p-4 border border-zinc-800 flex items-center justify-between"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center">
+                  <LayoutTemplate className="w-6 h-6 text-yellow-400" />
+                </div>
+                <div>
+                  <h3 className="font-semibold">Templates de Treino</h3>
+                  <p className="text-sm text-zinc-500">{workoutTemplates.length} templates compartilhados</p>
                 </div>
               </div>
             </motion.div>

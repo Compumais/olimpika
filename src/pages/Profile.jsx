@@ -68,7 +68,10 @@ export default function Profile() {
   const menuItems = [
     { icon: Dumbbell, label: 'Gerenciar Treinos', page: 'ManageWorkouts' },
     { icon: Calendar, label: 'Histórico Completo', page: 'History' },
-    { icon: Dumbbell, label: 'Biblioteca de Exercícios', page: 'ExerciseLibrary' }
+    { icon: Dumbbell, label: 'Biblioteca de Exercícios', page: 'ExerciseLibrary' },
+    ...(user?.user_type === 'personal' || user?.user_type === 'admin'
+      ? [{ icon: Settings, label: 'Templates de Treino', page: 'WorkoutTemplates' }]
+      : [])
   ];
 
   return (

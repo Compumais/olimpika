@@ -42,6 +42,52 @@ def _hash_password(password: str) -> str:
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
+def _get_actor(conn, actor_id: Optional[str] = None, actor_email: Optional[str] = None):
+    actor_id = (actor_id or "").strip()
+    actor_email = (actor_email or "").strip().lower()
+    cur = conn.cursor()
+    if actor_id:
+        cur.execute(
+            "SELECT id, email, full_name, user_type FROM users WHERE id = ?",
+            (actor_id,),
+        )
+        row = cur.fetchone()
+        if row:
+            return row_to_dict(row)
+    if actor_email:
+        cur.execute(
+            "SELECT id, email, full_name, user_type FROM users WHERE email = ?",
+            (actor_email,),
+        )
+        row = cur.fetchone()
+        if row:
+            return row_to_dict(row)
+    return None
+
+
+def _get_actor_from_payload(conn, payload: Dict[str, Any], required: bool = True):
+    actor = _get_actor(
+        conn,
+        actor_id=payload.get("actor_id") or payload.get("user_id"),
+        actor_email=payload.get("actor_email"),
+    )
+    if required and not actor:
+        raise HTTPException(
+            status_code=401,
+            detail="Usuário da ação não informado. Envie actor_id ou actor_email.",
+        )
+    return actor
+
+
+def _require_roles(actor: Dict[str, Any], allowed_roles: set[str], action_name: str) -> None:
+    role = (actor or {}).get("user_type")
+    if role not in allowed_roles:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Sem permissão para {action_name}.",
+        )
+
+
 # ---------------------------
 # Auth (SQLite)
 # ---------------------------
@@ -53,10 +99,10 @@ def auth_register(payload: Dict[str, Any]):
     user_type = (payload.get("user_type") or "").strip().lower()
     password = (payload.get("password") or "").strip()
 
-    if not email or not full_name or user_type not in ("aluno", "personal"):
+    if not email or not full_name or user_type not in ("aluno", "personal", "admin"):
         raise HTTPException(
             status_code=400,
-            detail="Dados inválidos: e-mail, nome e tipo (aluno/personal) são obrigatórios.",
+            detail="Dados inválidos: e-mail, nome e tipo (aluno/personal/admin) são obrigatórios.",
         )
     if not password or len(password) < 6:
         raise HTTPException(
@@ -178,8 +224,8 @@ def clear_all_users():
     """Remove todos os registros da tabela users (útil em desenvolvimento)."""
     with with_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM users")
-        n = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) AS n FROM users")
+        n = cur.fetchone()["n"]
         cur.execute("DELETE FROM users")
         conn.commit()
     return {"deleted": n, "message": f"{n} usuário(s) removido(s)."}
@@ -306,11 +352,75 @@ def list_workouts(
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
         rows = cur.execute(sql, params).fetchall()
-    return rows_to_dicts(rows)
+        result = rows_to_dicts(rows)
+
+        # Quando filtrado por aluno, inclui templates vinculados (sem clonar)
+        if student_id:
+            assigned_rows = cur.execute(
+                """
+                SELECT
+                    wta.id AS assignment_id,
+                    wt.id AS template_id,
+                    wt.name,
+                    wt.short_name,
+                    wt.description,
+                    wt.muscle_groups,
+                    wt.estimated_duration,
+                    wt.color,
+                    wt.created_date,
+                    wt.updated_date
+                FROM student_template_assignments wta
+                JOIN workout_templates wt ON wt.id = wta.template_id
+                WHERE wta.student_id = ? AND wta.is_active = TRUE AND wt.is_active = TRUE
+                ORDER BY wta.assigned_date DESC
+                """,
+                (student_id,),
+            ).fetchall()
+            for t in assigned_rows:
+                td = row_to_dict(t)
+                result.append(
+                    {
+                        "id": f"template:{td['template_id']}",
+                        "name": td["name"],
+                        "short_name": td.get("short_name"),
+                        "description": td.get("description"),
+                        "muscle_groups": td.get("muscle_groups"),
+                        "estimated_duration": td.get("estimated_duration"),
+                        "color": td.get("color"),
+                        "student_id": student_id,
+                        "is_template_assignment": True,
+                        "template_id": td["template_id"],
+                        "assignment_id": td["assignment_id"],
+                        "created_date": td.get("created_date"),
+                        "updated_date": td.get("updated_date"),
+                    }
+                )
+    return result
 
 
 @app.get("/workouts/{workout_id}")
 def get_workout(workout_id: str):
+    if workout_id.startswith("template:"):
+        template_id = workout_id.split("template:", 1)[1]
+        with with_connection() as conn:
+            cur = conn.cursor()
+            row = cur.execute(
+                """
+                SELECT id, name, short_name, description, muscle_groups,
+                       estimated_duration, color, created_date, updated_date
+                FROM workout_templates
+                WHERE id = ? AND is_active = TRUE
+                """,
+                (template_id,),
+            ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Template não encontrado")
+        data = row_to_dict(row)
+        data["id"] = f"template:{data['id']}"
+        data["is_template_assignment"] = True
+        data["template_id"] = template_id
+        return data
+
     with with_connection() as conn:
         cur = conn.cursor()
         row = cur.execute("SELECT * FROM workouts WHERE id = ?", (workout_id,)).fetchone()
@@ -370,10 +480,30 @@ def delete_workout(workout_id: str):
 @app.get("/exercises")
 def list_exercises(
     workout_id: Optional[str] = None,
+    template_id: Optional[str] = None,
     name: Optional[str] = None,
     muscle_group: Optional[str] = None,
     is_template: Optional[str] = None,
 ):
+    if workout_id and workout_id.startswith("template:"):
+        template_id = workout_id.split("template:", 1)[1]
+
+    if template_id:
+        with with_connection() as conn:
+            cur = conn.cursor()
+            clauses = ["template_id = ?"]
+            params: List[Any] = [template_id]
+            if name:
+                clauses.append("name = ?")
+                params.append(name)
+            if muscle_group:
+                clauses.append("muscle_group = ?")
+                params.append(muscle_group)
+            sql = "SELECT * FROM template_exercises WHERE " + " AND ".join(clauses)
+            sql += ' ORDER BY "order", name'
+            rows = cur.execute(sql, params).fetchall()
+        return rows_to_dicts(rows)
+
     with with_connection() as conn:
         cur = conn.cursor()
         clauses = []
@@ -460,6 +590,355 @@ def delete_exercise(exercise_id: str):
         cur.execute("DELETE FROM exercises WHERE id = ?", (exercise_id,))
         if cur.rowcount == 0:
             raise HTTPException(status_code=404, detail="Exercício não encontrado")
+        conn.commit()
+    return {}
+
+
+# ---------------------------
+# Workout Templates
+# ---------------------------
+
+@app.get("/workout-templates")
+def list_workout_templates(
+    name: Optional[str] = None,
+    created_by_id: Optional[str] = None,
+):
+    with with_connection() as conn:
+        cur = conn.cursor()
+        clauses = ["is_active = TRUE"]
+        params: List[Any] = []
+        if name:
+            clauses.append("name = ?")
+            params.append(name)
+        if created_by_id:
+            clauses.append("created_by_id = ?")
+            params.append(created_by_id)
+        sql = "SELECT * FROM workout_templates"
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY updated_date DESC"
+        rows = cur.execute(sql, params).fetchall()
+    return rows_to_dicts(rows)
+
+
+@app.post("/workout-templates", status_code=201)
+def create_workout_template(payload: Dict[str, Any]):
+    data = dict(payload)
+    with with_connection() as conn:
+        actor = _get_actor_from_payload(conn, data, required=True)
+        _require_roles(actor, {"personal", "admin"}, "criar template")
+
+        if "id" not in data or not data["id"]:
+            data["id"] = uuid.uuid4().hex
+
+        now = datetime.utcnow().isoformat() + "Z"
+        data.setdefault("created_date", now)
+        data.setdefault("updated_date", now)
+        data["created_by_id"] = actor["id"]
+        data["created_by"] = actor.get("email")
+        data.setdefault("is_active", True)
+
+        allowed_cols = {
+            "id",
+            "name",
+            "short_name",
+            "description",
+            "muscle_groups",
+            "estimated_duration",
+            "color",
+            "created_by_id",
+            "created_by",
+            "created_date",
+            "updated_date",
+            "is_active",
+        }
+        filtered = {k: v for k, v in data.items() if k in allowed_cols}
+        if not (filtered.get("name") or "").strip():
+            raise HTTPException(status_code=400, detail="Nome do template é obrigatório.")
+
+        cur = conn.cursor()
+        cols = list(filtered.keys())
+        placeholders = ",".join("?" for _ in cols)
+        sql = f"INSERT INTO workout_templates ({','.join(cols)}) VALUES ({placeholders})"
+        cur.execute(sql, [filtered[c] for c in cols])
+        conn.commit()
+        row = cur.execute("SELECT * FROM workout_templates WHERE id = ?", (filtered["id"],)).fetchone()
+    return row_to_dict(row)
+
+
+@app.put("/workout-templates/{template_id}")
+def update_workout_template(template_id: str, payload: Dict[str, Any]):
+    if not payload:
+        raise HTTPException(status_code=400, detail="Dados inválidos")
+    with with_connection() as conn:
+        actor = _get_actor_from_payload(conn, payload, required=True)
+        _require_roles(actor, {"personal", "admin"}, "editar template")
+
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM workout_templates WHERE id = ? AND is_active = TRUE", (template_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Template não encontrado")
+
+        allowed_cols = {"name", "short_name", "description", "muscle_groups", "estimated_duration", "color"}
+        filtered = {k: v for k, v in payload.items() if k in allowed_cols}
+        if not filtered:
+            raise HTTPException(status_code=400, detail="Nenhum campo permitido para atualizar.")
+
+        filtered["updated_date"] = datetime.utcnow().isoformat() + "Z"
+        cols = list(filtered.keys())
+        set_clause = ", ".join(f"{c} = ?" for c in cols)
+        params = [filtered[c] for c in cols] + [template_id]
+        cur.execute(f"UPDATE workout_templates SET {set_clause} WHERE id = ?", params)
+        conn.commit()
+        row = cur.execute("SELECT * FROM workout_templates WHERE id = ?", (template_id,)).fetchone()
+    return row_to_dict(row)
+
+
+@app.delete("/workout-templates/{template_id}", status_code=204)
+def delete_workout_template(
+    template_id: str,
+    actor_id: Optional[str] = None,
+    actor_email: Optional[str] = None,
+):
+    with with_connection() as conn:
+        actor = _get_actor(conn, actor_id=actor_id, actor_email=actor_email)
+        if not actor:
+            raise HTTPException(status_code=401, detail="Usuário da ação não informado.")
+        _require_roles(actor, {"admin"}, "excluir template")
+
+        cur = conn.cursor()
+        cur.execute("DELETE FROM workout_templates WHERE id = ?", (template_id,))
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Template não encontrado")
+        conn.commit()
+    return {}
+
+
+@app.get("/workout-templates/{template_id}/exercises")
+def list_template_exercises(template_id: str):
+    with with_connection() as conn:
+        cur = conn.cursor()
+        rows = cur.execute(
+            'SELECT * FROM template_exercises WHERE template_id = ? ORDER BY "order", name',
+            (template_id,),
+        ).fetchall()
+    return rows_to_dicts(rows)
+
+
+@app.post("/workout-templates/{template_id}/exercises", status_code=201)
+def create_template_exercise(template_id: str, payload: Dict[str, Any]):
+    data = dict(payload)
+    with with_connection() as conn:
+        actor = _get_actor_from_payload(conn, data, required=True)
+        _require_roles(actor, {"personal", "admin"}, "criar exercício de template")
+
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM workout_templates WHERE id = ? AND is_active = TRUE", (template_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Template não encontrado")
+
+        if "id" not in data or not data["id"]:
+            data["id"] = uuid.uuid4().hex
+        now = datetime.utcnow().isoformat() + "Z"
+        data["template_id"] = template_id
+        data.setdefault("created_date", now)
+        data.setdefault("updated_date", now)
+        data.setdefault("created_by_id", actor["id"])
+        data.setdefault("created_by", actor.get("email"))
+
+        allowed_cols = {
+            "id",
+            "template_id",
+            "name",
+            "description",
+            "image_url",
+            "video_url",
+            "sets",
+            "reps",
+            "weight",
+            "rest_seconds",
+            "order",
+            "muscle_group",
+            "created_by_id",
+            "created_by",
+            "created_date",
+            "updated_date",
+        }
+        filtered = {k: v for k, v in data.items() if k in allowed_cols}
+        if not (filtered.get("name") or "").strip():
+            raise HTTPException(status_code=400, detail="Nome do exercício é obrigatório.")
+
+        cols = list(filtered.keys())
+        cols_sql = ",".join(_quote_ident(c) for c in cols)
+        placeholders = ",".join("?" for _ in cols)
+        sql = f"INSERT INTO template_exercises ({cols_sql}) VALUES ({placeholders})"
+        cur.execute(sql, [filtered[c] for c in cols])
+        conn.commit()
+        row = cur.execute("SELECT * FROM template_exercises WHERE id = ?", (filtered["id"],)).fetchone()
+    return row_to_dict(row)
+
+
+@app.put("/workout-templates/{template_id}/exercises/{exercise_id}")
+def update_template_exercise(template_id: str, exercise_id: str, payload: Dict[str, Any]):
+    if not payload:
+        raise HTTPException(status_code=400, detail="Dados inválidos")
+    with with_connection() as conn:
+        actor = _get_actor_from_payload(conn, payload, required=True)
+        _require_roles(actor, {"personal", "admin"}, "editar exercício de template")
+
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id FROM template_exercises WHERE id = ? AND template_id = ?",
+            (exercise_id, template_id),
+        )
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Exercício de template não encontrado")
+
+        allowed_cols = {"name", "description", "image_url", "video_url", "sets", "reps", "weight", "rest_seconds", "order", "muscle_group"}
+        filtered = {k: v for k, v in payload.items() if k in allowed_cols}
+        if not filtered:
+            raise HTTPException(status_code=400, detail="Nenhum campo permitido para atualizar.")
+        filtered["updated_date"] = datetime.utcnow().isoformat() + "Z"
+
+        cols = list(filtered.keys())
+        set_clause = ", ".join(f"{_quote_ident(c)} = ?" for c in cols)
+        params = [filtered[c] for c in cols] + [exercise_id, template_id]
+        cur.execute(
+            f"UPDATE template_exercises SET {set_clause} WHERE id = ? AND template_id = ?",
+            params,
+        )
+        conn.commit()
+        row = cur.execute("SELECT * FROM template_exercises WHERE id = ?", (exercise_id,)).fetchone()
+    return row_to_dict(row)
+
+
+@app.delete("/workout-templates/{template_id}/exercises/{exercise_id}", status_code=204)
+def delete_template_exercise(
+    template_id: str,
+    exercise_id: str,
+    actor_id: Optional[str] = None,
+    actor_email: Optional[str] = None,
+):
+    with with_connection() as conn:
+        actor = _get_actor(conn, actor_id=actor_id, actor_email=actor_email)
+        if not actor:
+            raise HTTPException(status_code=401, detail="Usuário da ação não informado.")
+        _require_roles(actor, {"personal", "admin"}, "excluir exercício de template")
+
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM template_exercises WHERE id = ? AND template_id = ?",
+            (exercise_id, template_id),
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Exercício de template não encontrado")
+        conn.commit()
+    return {}
+
+
+# ---------------------------
+# Template Assignments
+# ---------------------------
+
+@app.post("/students/{student_id}/template-assignments", status_code=201)
+def assign_template_to_student(student_id: str, payload: Dict[str, Any]):
+    template_id = (payload.get("template_id") or "").strip()
+    if not template_id:
+        raise HTTPException(status_code=400, detail="template_id é obrigatório.")
+
+    with with_connection() as conn:
+        actor = _get_actor_from_payload(conn, payload, required=True)
+        _require_roles(actor, {"personal", "admin"}, "atribuir template ao aluno")
+
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM students WHERE id = ?", (student_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Aluno não encontrado")
+        cur.execute("SELECT id FROM workout_templates WHERE id = ? AND is_active = TRUE", (template_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Template não encontrado")
+
+        cur.execute(
+            """
+            SELECT id FROM student_template_assignments
+            WHERE student_id = ? AND template_id = ? AND is_active = TRUE
+            """,
+            (student_id, template_id),
+        )
+        if cur.fetchone():
+            raise HTTPException(status_code=400, detail="Template já está atribuído para este aluno.")
+
+        assignment_id = uuid.uuid4().hex
+        now = datetime.utcnow().isoformat() + "Z"
+        cur.execute(
+            """
+            INSERT INTO student_template_assignments (
+                id, student_id, template_id, assigned_by_id, assigned_by, assigned_date, notes, is_active
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, TRUE)
+            """,
+            (
+                assignment_id,
+                student_id,
+                template_id,
+                actor["id"],
+                actor.get("email"),
+                now,
+                payload.get("notes"),
+            ),
+        )
+        conn.commit()
+        row = cur.execute(
+            "SELECT * FROM student_template_assignments WHERE id = ?",
+            (assignment_id,),
+        ).fetchone()
+    return row_to_dict(row)
+
+
+@app.get("/students/{student_id}/template-assignments")
+def list_student_template_assignments(student_id: str):
+    with with_connection() as conn:
+        cur = conn.cursor()
+        rows = cur.execute(
+            """
+            SELECT
+                a.*,
+                wt.name AS template_name,
+                wt.short_name AS template_short_name,
+                wt.description AS template_description
+            FROM student_template_assignments a
+            JOIN workout_templates wt ON wt.id = a.template_id
+            WHERE a.student_id = ? AND a.is_active = TRUE AND wt.is_active = TRUE
+            ORDER BY a.assigned_date DESC
+            """,
+            (student_id,),
+        ).fetchall()
+    return rows_to_dicts(rows)
+
+
+@app.delete("/students/{student_id}/template-assignments/{assignment_id}", status_code=204)
+def remove_student_template_assignment(
+    student_id: str,
+    assignment_id: str,
+    actor_id: Optional[str] = None,
+    actor_email: Optional[str] = None,
+):
+    with with_connection() as conn:
+        actor = _get_actor(conn, actor_id=actor_id, actor_email=actor_email)
+        if not actor:
+            raise HTTPException(status_code=401, detail="Usuário da ação não informado.")
+        _require_roles(actor, {"personal", "admin"}, "remover template do aluno")
+
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE student_template_assignments
+            SET is_active = FALSE
+            WHERE id = ? AND student_id = ? AND is_active = TRUE
+            """,
+            (assignment_id, student_id),
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Vínculo de template não encontrado")
         conn.commit()
     return {}
 

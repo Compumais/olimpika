@@ -1,4 +1,9 @@
+# API (main.py)
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
+
+# PostgreSQL (db.py, migration.py, seed.py, etc.)
 psycopg2-binary==2.9.10
 
+# Carrega variáveis do .env
+python-dotenv==1.0.0

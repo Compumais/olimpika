@@ -60,6 +60,8 @@ import PersonalHome from './pages/PersonalHome';
 import ManageStudents from './pages/ManageStudents';
 import StudentWorkouts from './pages/StudentWorkouts';
 import ListUsers from './pages/ListUsers';
+import WorkoutTemplates from './pages/WorkoutTemplates';
+import TemplateExercises from './pages/TemplateExercises';
 import __Layout from './Layout.jsx';
 
 
@@ -77,6 +79,8 @@ export const PAGES = {
     "ManageStudents": ManageStudents,
     "StudentWorkouts": StudentWorkouts,
     "ListUsers": ListUsers,
+    "WorkoutTemplates": WorkoutTemplates,
+    "TemplateExercises": TemplateExercises,
 }
 
 export const pagesConfig = {
