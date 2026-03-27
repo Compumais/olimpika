@@ -10,7 +10,8 @@ import {
   Plus,
   Settings,
   User,
-  LayoutTemplate
+  LayoutTemplate,
+  AlertCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import OlimpikaLogo from "@/components/OlimpikaLogo";
@@ -34,10 +35,39 @@ export default function PersonalHome() {
     queryFn: () => localApi.getWorkoutTemplates(),
   });
 
+  const { data: students = [] } = useQuery({
+    queryKey: ['students'],
+    queryFn: () => localApi.getStudents({}),
+    enabled: !!user
+  });
+
+  const today = new Date().toISOString().split('T')[0];
+  const myStudents = students.filter(
+    (s) => !user?.email || s.personal_trainer_email === user.email
+  );
+  const studentsWithExpiredWorkouts = myStudents.filter(
+    (s) => s.next_expires_at && s.next_expires_at < today
+  );
+
+  const formatDate = (iso) => {
+    if (!iso) return "—";
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+    } catch {
+      return iso;
+    }
+  };
+
+  const adoptedCount = students.filter(
+    (s) => s.personal_trainer_email === user?.email
+  ).length;
+
   const stats = [
-    { label: "Treinos Criados", value: workouts.length, icon: Dumbbell, color: "yellow" },
-    { label: "Exercícios", value: exercises.length, icon: TrendingUp, color: "blue" },
-    { label: "Templates", value: workoutTemplates.length, icon: LayoutTemplate, color: "green" }
+    { label: "Alunos Adotados", value: adoptedCount, icon: User, color: "yellow" },
+    { label: "Treinos Criados", value: workouts.length, icon: Dumbbell, color: "blue" },
+    { label: "Exercícios", value: exercises.length, icon: TrendingUp, color: "green" },
+    { label: "Templates", value: workoutTemplates.length, icon: LayoutTemplate, color: "purple" }
   ];
 
   return (
@@ -58,9 +88,10 @@ export default function PersonalHome() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {stats.map((stat, index) => {
             const Icon = stat.icon;
+            const iconColorClass = { yellow: "text-yellow-400", blue: "text-blue-400", green: "text-green-400", purple: "text-purple-400" }[stat.color] || "text-zinc-400";
             return (
               <motion.div
                 key={stat.label}
@@ -69,7 +100,7 @@ export default function PersonalHome() {
                 transition={{ delay: index * 0.1 }}
                 className="bg-zinc-900/50 rounded-xl border border-zinc-800 p-4 text-center"
               >
-                <Icon className={`w-6 h-6 mx-auto mb-2 text-${stat.color}-400`} />
+                <Icon className={`w-6 h-6 mx-auto mb-2 ${iconColorClass}`} />
                 <p className="text-2xl font-bold">{stat.value}</p>
                 <p className="text-xs text-zinc-500">{stat.label}</p>
               </motion.div>
@@ -77,6 +108,48 @@ export default function PersonalHome() {
           })}
         </div>
       </div>
+
+      {/* Alunos com treinos vencidos */}
+      {studentsWithExpiredWorkouts.length > 0 && (
+        <div className="px-6 py-4 border-b border-zinc-800">
+          <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+            <AlertCircle className="w-5 h-5 text-red-400" />
+            Treinos vencidos
+          </h2>
+          <p className="text-sm text-zinc-500 mb-3">
+            Alunos com treinos que precisam de renovação
+          </p>
+          <div className="space-y-2">
+            {studentsWithExpiredWorkouts.map((student) => (
+              <Link
+                key={student.id}
+                to={createPageUrl('StudentWorkouts') + `?student_id=${student.id}&student_name=${encodeURIComponent(student.name)}`}
+              >
+                <motion.div
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.99 }}
+                  className="bg-zinc-900/80 rounded-xl border border-red-900/50 p-4 hover:border-red-800/60 transition-colors"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center">
+                        <User className="w-5 h-5 text-red-400" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-white">{student.name}</h3>
+                        <p className="text-xs text-zinc-500">
+                          Venceu em {formatDate(student.next_expires_at)}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-xs text-red-400 font-medium">Gerenciar treinos →</span>
+                  </div>
+                </motion.div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Quick Actions */}
       <div className="p-6">
@@ -174,7 +247,7 @@ export default function PersonalHome() {
         ) : (
           <div className="space-y-3">
             {workouts.slice(0, 3).map((workout) => (
-              <Link key={workout.id} to={createPageUrl('ManageExercises') + `?workoutId=${workout.id}`}>
+              <Link key={workout.id} to={createPageUrl('ManageExercises') + `?workout_id=${workout.id}`}>
                 <div className="bg-zinc-900/50 rounded-xl border border-zinc-800 p-4 hover:border-zinc-700 transition-colors">
                   <div className="flex items-center justify-between">
                     <div>

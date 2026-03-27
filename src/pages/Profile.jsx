@@ -191,9 +191,8 @@ export default function Profile() {
           transition={{ delay: 0.3 }}
         >
           <Button
-            variant="outline"
             onClick={handleLogout}
-            className="w-full border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+            className="w-full bg-yellow-500 hover:bg-yellow-600 text-black"
           >
             <LogOut className="w-5 h-5 mr-2" />
             Sair da Conta

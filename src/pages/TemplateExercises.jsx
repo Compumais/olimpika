@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { createPageUrl } from "@/utils";
+import { createPageUrl, parseWeightForInput, formatWeightDisplay } from "@/utils";
 import { ArrowLeft, Plus, Edit, Trash2, Dumbbell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +32,7 @@ export default function TemplateExercises() {
     rest_seconds: "",
     order: "",
     muscle_group: "",
+    method_group: "",
   });
 
   const { data: templates = [] } = useQuery({
@@ -46,6 +47,7 @@ export default function TemplateExercises() {
   });
 
   const currentTemplate = templates.find((t) => t.id === templateId);
+  const hasMethodGroups = ["bi-set", "tri-set", "circuito"].includes(currentTemplate?.training_method || "");
 
   const createMutation = useMutation({
     mutationFn: (data) => localApi.createTemplateExercise(templateId, data, user),
@@ -82,10 +84,11 @@ export default function TemplateExercises() {
         video_url: exercise.video_url || "",
         sets: exercise.sets || "",
         reps: exercise.reps || "",
-        weight: exercise.weight || "",
+        weight: parseWeightForInput(exercise.weight) || "",
         rest_seconds: exercise.rest_seconds || "",
         order: exercise.order || "",
         muscle_group: exercise.muscle_group || "",
+        method_group: exercise.method_group != null ? String(exercise.method_group) : "",
       });
     } else {
       setEditingExercise(null);
@@ -100,6 +103,7 @@ export default function TemplateExercises() {
         rest_seconds: "",
         order: String(exercises.length + 1),
         muscle_group: "",
+        method_group: "",
       });
     }
     setDialogOpen(true);
@@ -114,6 +118,10 @@ export default function TemplateExercises() {
   const handleSubmit = () => {
     if (!formData.name.trim()) return;
     const payload = { ...formData };
+    if (hasMethodGroups && formData.method_group) {
+      payload.method_group = parseInt(formData.method_group, 10);
+    }
+    if (payload.method_group === "" || payload.method_group === undefined) delete payload.method_group;
     if (editingExercise) {
       updateMutation.mutate({ id: editingExercise.id, data: payload });
     } else {
@@ -133,7 +141,14 @@ export default function TemplateExercises() {
             </Link>
             <div>
               <h1 className="text-xl font-bold">Exercícios do Template</h1>
-              <p className="text-sm text-zinc-500">{currentTemplate?.name || "Template"}</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-sm text-zinc-500">{currentTemplate?.name || "Template"}</p>
+                {hasMethodGroups && (
+                  <span className="px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-400 text-xs font-medium">
+                    {currentTemplate?.training_method === "bi-set" ? "Bi-set" : currentTemplate?.training_method === "tri-set" ? "Tri-set" : "Circuito"}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
           <Button onClick={() => handleOpenDialog()} className="bg-yellow-500 hover:bg-yellow-600 text-black">
@@ -160,40 +175,79 @@ export default function TemplateExercises() {
             </Button>
           </div>
         ) : (
-          <div className="grid gap-3">
-            {exercises.map((exercise) => (
-              <div key={exercise.id} className="bg-zinc-900/50 rounded-xl border border-zinc-800 p-4">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h3 className="font-semibold">{exercise.name}</h3>
-                    <p className="text-sm text-zinc-400">{exercise.description || "Sem descrição"}</p>
-                    <p className="text-xs text-zinc-500 mt-2">
-                      {exercise.sets || "-"} x {exercise.reps || "-"}
-                      {exercise.weight ? ` • ${exercise.weight}` : ""}
-                      {exercise.muscle_group ? ` • ${exercise.muscle_group}` : ""}
-                    </p>
+          <div className="space-y-4">
+            {(() => {
+              if (!hasMethodGroups) {
+                return exercises.map((exercise) => (
+                  <div key={exercise.id} className="bg-zinc-900/50 rounded-xl border border-zinc-800 p-4">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <h3 className="font-semibold">{exercise.name}</h3>
+                        <p className="text-sm text-zinc-400">{exercise.description || "Sem descrição"}</p>
+                        <p className="text-xs text-zinc-500 mt-2">
+                          {exercise.sets || "-"} x {exercise.reps || "-"}
+                          {exercise.weight != null && exercise.weight !== "" ? ` • ${formatWeightDisplay(exercise.weight)}` : ""}
+                          {exercise.muscle_group ? ` • ${exercise.muscle_group}` : ""}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button variant="ghost" size="icon" onClick={() => handleOpenDialog(exercise)} className="text-zinc-400 hover:text-yellow-400">
+                          <Edit className="w-4 h-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" onClick={() => deleteMutation.mutate(exercise.id)} className="text-zinc-400 hover:text-red-400">
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleOpenDialog(exercise)}
-                      className="text-zinc-400 hover:text-yellow-400"
-                    >
-                      <Edit className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => deleteMutation.mutate(exercise.id)}
-                      className="text-zinc-400 hover:text-red-400"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
+                ));
+              }
+              const groups = {};
+              exercises.forEach((ex) => {
+                const g = ex.method_group ?? 0;
+                if (!groups[g]) groups[g] = [];
+                groups[g].push(ex);
+              });
+              const sortedGroups = Object.keys(groups).map(Number).sort((a, b) => a - b);
+              const methodLabel = currentTemplate?.training_method === "bi-set" ? "Bi-set" : currentTemplate?.training_method === "tri-set" ? "Tri-set" : "Circuito";
+              return sortedGroups.map((gKey) => (
+                <div key={gKey} className="space-y-2">
+                  {gKey !== 0 && (
+                    <div className="px-3 py-2 rounded-lg bg-yellow-500/15 border border-yellow-500/30 text-yellow-400 text-sm font-medium">
+                      Grupo {gKey} ({methodLabel}) — executar combinadamente
+                    </div>
+                  )}
+                  {groups[gKey].map((exercise) => (
+                    <div key={exercise.id} className="bg-zinc-900/50 rounded-xl border border-zinc-800 p-4">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {exercise.method_group && (
+                              <span className="px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-400 text-xs">Grupo {exercise.method_group}</span>
+                            )}
+                            <h3 className="font-semibold">{exercise.name}</h3>
+                          </div>
+                          <p className="text-sm text-zinc-400">{exercise.description || "Sem descrição"}</p>
+                          <p className="text-xs text-zinc-500 mt-2">
+                            {exercise.sets || "-"} x {exercise.reps || "-"}
+                            {exercise.weight != null && exercise.weight !== "" ? ` • ${formatWeightDisplay(exercise.weight)}` : ""}
+                            {exercise.muscle_group ? ` • ${exercise.muscle_group}` : ""}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button variant="ghost" size="icon" onClick={() => handleOpenDialog(exercise)} className="text-zinc-400 hover:text-yellow-400">
+                            <Edit className="w-4 h-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => deleteMutation.mutate(exercise.id)} className="text-zinc-400 hover:text-red-400">
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </div>
-            ))}
+              ));
+            })()}
           </div>
         )}
       </div>
@@ -238,12 +292,18 @@ export default function TemplateExercises() {
                 />
               </div>
               <div>
-                <Label>Carga</Label>
-                <Input
-                  value={formData.weight}
-                  onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
-                  className="bg-zinc-800 border-zinc-700 mt-1"
-                />
+                <Label>Carga (kg)</Label>
+                <div className="flex items-center gap-2 mt-1">
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={formData.weight}
+                    onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
+                    className="bg-zinc-800 border-zinc-700"
+                  />
+                  <span className="text-zinc-400 font-medium">kg</span>
+                </div>
               </div>
               <div>
                 <Label>Descanso (s)</Label>
@@ -270,9 +330,25 @@ export default function TemplateExercises() {
                 />
               </div>
             </div>
+            {hasMethodGroups && (
+              <div>
+                <Label>Grupo (executar combinadamente)</Label>
+                <select
+                  value={formData.method_group}
+                  onChange={(e) => setFormData({ ...formData, method_group: e.target.value })}
+                  className="mt-1 w-full h-10 rounded-md bg-zinc-800 border border-zinc-700 px-3 text-white"
+                >
+                  <option value="">— Nenhum</option>
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((g) => (
+                    <option key={g} value={g}>Grupo {g}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-zinc-500 mt-1">Exercícios no mesmo grupo são feitos combinadamente</p>
+              </div>
+            )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={handleCloseDialog} className="border-zinc-700 text-white">
+            <Button onClick={handleCloseDialog} className="bg-yellow-500 hover:bg-yellow-600 text-black">
               Cancelar
             </Button>
             <Button

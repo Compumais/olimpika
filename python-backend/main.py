@@ -240,6 +240,7 @@ def list_students(
     email: Optional[str] = None,
     personal_trainer_email: Optional[str] = None,
     name: Optional[str] = None,
+    with_workout_summary: Optional[bool] = None,
 ):
     with with_connection() as conn:
         cur = conn.cursor()
@@ -258,7 +259,67 @@ def list_students(
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
         rows = cur.execute(sql, params).fetchall()
-    return rows_to_dicts(rows)
+        result = rows_to_dicts(rows)
+
+        if with_workout_summary and result:
+            student_ids = [s["id"] for s in result]
+            today = datetime.utcnow().strftime("%Y-%m-%d")
+            summary_by_student: Dict[str, Dict[str, Any]] = {}
+
+            for sid in student_ids:
+                cur.execute(
+                    """
+                    SELECT created_by, created_date, expires_at
+                    FROM workouts
+                    WHERE student_id = ? AND (created_by IS NOT NULL OR expires_at IS NOT NULL)
+                    ORDER BY created_date DESC NULLS LAST
+                    """,
+                    (sid,),
+                )
+                workout_rows = cur.fetchall()
+                cur.execute(
+                    """
+                    SELECT assigned_by, assigned_date, expires_at
+                    FROM student_template_assignments
+                    WHERE student_id = ? AND is_active = TRUE
+                    AND (assigned_by IS NOT NULL OR expires_at IS NOT NULL)
+                    ORDER BY assigned_date DESC NULLS LAST
+                    """,
+                    (sid,),
+                )
+                assignment_rows = cur.fetchall()
+
+                all_dates = []
+                best_by = None
+                best_date = None
+                for r in workout_rows:
+                    rd = dict(r)
+                    if rd.get("expires_at"):
+                        all_dates.append(rd["expires_at"])
+                    if rd.get("created_by") and (best_date is None or (rd.get("created_date") or "") > (best_date or "")):
+                        best_by = rd["created_by"]
+                        best_date = rd.get("created_date")
+                for r in assignment_rows:
+                    rd = dict(r)
+                    if rd.get("expires_at"):
+                        all_dates.append(rd["expires_at"])
+                    if rd.get("assigned_by") and (best_date is None or (rd.get("assigned_date") or "") > (best_date or "")):
+                        best_by = rd["assigned_by"]
+                        best_date = rd.get("assigned_date")
+
+                future_dates = [d for d in all_dates if d and d >= today]
+                next_expires = min(future_dates) if future_dates else (max(all_dates) if all_dates else None)
+                summary_by_student[sid] = {
+                    "workout_assigned_by": best_by,
+                    "next_expires_at": next_expires,
+                }
+
+            for s in result:
+                summary = summary_by_student.get(s["id"], {})
+                s["workout_assigned_by"] = summary.get("workout_assigned_by")
+                s["next_expires_at"] = summary.get("next_expires_at")
+
+    return result
 
 
 @app.get("/students/{student_id}")
@@ -360,6 +421,9 @@ def list_workouts(
                 """
                 SELECT
                     wta.id AS assignment_id,
+                    wta.assigned_by,
+                    wta.assigned_date,
+                    wta.expires_at,
                     wt.id AS template_id,
                     wt.name,
                     wt.short_name,
@@ -367,6 +431,7 @@ def list_workouts(
                     wt.muscle_groups,
                     wt.estimated_duration,
                     wt.color,
+                    wt.training_method,
                     wt.created_date,
                     wt.updated_date
                 FROM student_template_assignments wta
@@ -391,6 +456,10 @@ def list_workouts(
                         "is_template_assignment": True,
                         "template_id": td["template_id"],
                         "assignment_id": td["assignment_id"],
+                        "assigned_by": td.get("assigned_by"),
+                        "assigned_date": td.get("assigned_date"),
+                        "expires_at": td.get("expires_at"),
+                        "training_method": td.get("training_method"),
                         "created_date": td.get("created_date"),
                         "updated_date": td.get("updated_date"),
                     }
@@ -407,7 +476,7 @@ def get_workout(workout_id: str):
             row = cur.execute(
                 """
                 SELECT id, name, short_name, description, muscle_groups,
-                       estimated_duration, color, created_date, updated_date
+                       estimated_duration, color, training_method, created_date, updated_date
                 FROM workout_templates
                 WHERE id = ? AND is_active = TRUE
                 """,
@@ -466,9 +535,12 @@ def update_workout(workout_id: str, payload: Dict[str, Any]):
 def delete_workout(workout_id: str):
     with with_connection() as conn:
         cur = conn.cursor()
-        cur.execute("DELETE FROM workouts WHERE id = ?", (workout_id,))
-        if cur.rowcount == 0:
+        cur.execute("SELECT id FROM workouts WHERE id = ?", (workout_id,))
+        if not cur.fetchone():
             raise HTTPException(status_code=404, detail="Treino não encontrado")
+        cur.execute("DELETE FROM exercises WHERE workout_id = ?", (workout_id,))
+        cur.execute("UPDATE workout_sessions SET workout_id = NULL WHERE workout_id = ?", (workout_id,))
+        cur.execute("DELETE FROM workouts WHERE id = ?", (workout_id,))
         conn.commit()
     return {}
 
@@ -500,7 +572,7 @@ def list_exercises(
                 clauses.append("muscle_group = ?")
                 params.append(muscle_group)
             sql = "SELECT * FROM template_exercises WHERE " + " AND ".join(clauses)
-            sql += ' ORDER BY "order", name'
+            sql += ' ORDER BY method_group NULLS LAST, "order", name'
             rows = cur.execute(sql, params).fetchall()
         return rows_to_dicts(rows)
 
@@ -526,6 +598,7 @@ def list_exercises(
         sql = "SELECT * FROM exercises"
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
+        sql += ' ORDER BY method_group NULLS LAST, "order", name'
         rows = cur.execute(sql, params).fetchall()
     return rows_to_dicts(rows)
 
@@ -646,6 +719,7 @@ def create_workout_template(payload: Dict[str, Any]):
             "muscle_groups",
             "estimated_duration",
             "color",
+            "training_method",
             "created_by_id",
             "created_by",
             "created_date",
@@ -679,7 +753,7 @@ def update_workout_template(template_id: str, payload: Dict[str, Any]):
         if not cur.fetchone():
             raise HTTPException(status_code=404, detail="Template não encontrado")
 
-        allowed_cols = {"name", "short_name", "description", "muscle_groups", "estimated_duration", "color"}
+        allowed_cols = {"name", "short_name", "description", "muscle_groups", "estimated_duration", "color", "training_method"}
         filtered = {k: v for k, v in payload.items() if k in allowed_cols}
         if not filtered:
             raise HTTPException(status_code=400, detail="Nenhum campo permitido para atualizar.")
@@ -719,7 +793,7 @@ def list_template_exercises(template_id: str):
     with with_connection() as conn:
         cur = conn.cursor()
         rows = cur.execute(
-            'SELECT * FROM template_exercises WHERE template_id = ? ORDER BY "order", name',
+            'SELECT * FROM template_exercises WHERE template_id = ? ORDER BY method_group NULLS LAST, "order", name',
             (template_id,),
         ).fetchall()
     return rows_to_dicts(rows)
@@ -759,6 +833,7 @@ def create_template_exercise(template_id: str, payload: Dict[str, Any]):
             "rest_seconds",
             "order",
             "muscle_group",
+            "method_group",
             "created_by_id",
             "created_by",
             "created_date",
@@ -794,7 +869,7 @@ def update_template_exercise(template_id: str, exercise_id: str, payload: Dict[s
         if not cur.fetchone():
             raise HTTPException(status_code=404, detail="Exercício de template não encontrado")
 
-        allowed_cols = {"name", "description", "image_url", "video_url", "sets", "reps", "weight", "rest_seconds", "order", "muscle_group"}
+        allowed_cols = {"name", "description", "image_url", "video_url", "sets", "reps", "weight", "rest_seconds", "order", "muscle_group", "method_group"}
         filtered = {k: v for k, v in payload.items() if k in allowed_cols}
         if not filtered:
             raise HTTPException(status_code=400, detail="Nenhum campo permitido para atualizar.")
@@ -870,11 +945,12 @@ def assign_template_to_student(student_id: str, payload: Dict[str, Any]):
 
         assignment_id = uuid.uuid4().hex
         now = datetime.utcnow().isoformat() + "Z"
+        expires_at = (payload.get("expires_at") or "").strip() or None
         cur.execute(
             """
             INSERT INTO student_template_assignments (
-                id, student_id, template_id, assigned_by_id, assigned_by, assigned_date, notes, is_active
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, TRUE)
+                id, student_id, template_id, assigned_by_id, assigned_by, assigned_date, expires_at, notes, is_active
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE)
             """,
             (
                 assignment_id,
@@ -883,6 +959,7 @@ def assign_template_to_student(student_id: str, payload: Dict[str, Any]):
                 actor["id"],
                 actor.get("email"),
                 now,
+                expires_at,
                 payload.get("notes"),
             ),
         )
@@ -959,22 +1036,32 @@ def list_workout_sessions(
         clauses = []
         params: List[Any] = []
         if user_email:
-            clauses.append("user_email = ?")
+            clauses.append("ws.user_email = ?")
             params.append(user_email)
         if workout_id:
-            clauses.append("workout_id = ?")
+            clauses.append("ws.workout_id = ?")
             params.append(workout_id)
         if date:
-            clauses.append("date = ?")
+            clauses.append("ws.date = ?")
             params.append(date)
         if status:
-            clauses.append("status = ?")
+            clauses.append("ws.status = ?")
             params.append(status)
-        sql = "SELECT * FROM workout_sessions"
-        if clauses:
-            sql += " WHERE " + " AND ".join(clauses)
+        prefixed = clauses
+        sql = """
+            SELECT ws.*, w.short_name AS workout_short_name
+            FROM workout_sessions ws
+            LEFT JOIN workouts w ON ws.workout_id = w.id
+        """
+        if prefixed:
+            sql += " WHERE " + " AND ".join(prefixed)
         rows = cur.execute(sql, params).fetchall()
-    return rows_to_dicts(rows)
+        result = rows_to_dicts(rows)
+        for r in result:
+            short = r.pop("workout_short_name", None)
+            if short:
+                r["short_name"] = short
+        return result
 
 
 @app.get("/workout-sessions/{session_id}")

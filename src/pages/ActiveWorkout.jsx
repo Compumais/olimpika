@@ -28,11 +28,13 @@ export default function ActiveWorkout() {
 
   const [session, setSession] = useState(null);
   const [completedExercises, setCompletedExercises] = useState([]);
+  const [weightOverrides, setWeightOverrides] = useState({});
   const [elapsedTime, setElapsedTime] = useState(0);
   const [showFinishDialog, setShowFinishDialog] = useState(false);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
 
   const { user } = useAuth();
+  const isTemplateWorkout = workoutId?.startsWith?.("template:");
 
   const { data: workout, isLoading: loadingWorkout } = useQuery({
     queryKey: ['workout', workoutId],
@@ -87,6 +89,38 @@ export default function ActiveWorkout() {
     }
   };
 
+  const handleCompleteGroup = (groupExercises) => {
+    const ids = groupExercises.map((e) => e.id);
+    const allComplete = ids.every((id) => completedExercises.includes(id));
+    if (allComplete) {
+      setCompletedExercises((prev) => prev.filter((id) => !ids.includes(id)));
+    } else {
+      setCompletedExercises((prev) => [...new Set([...prev, ...ids])]);
+    }
+  };
+
+  const handleWeightChange = (exerciseId, weight) => {
+    setWeightOverrides((prev) => {
+      const next = { ...prev };
+      if (weight === null || weight === "") {
+        delete next[exerciseId];
+      } else {
+        next[exerciseId] = weight;
+      }
+      return next;
+    });
+    if (!isTemplateWorkout && weight !== undefined) {
+      updateWeightMutation.mutate({ id: exerciseId, weight: weight || null });
+    }
+  };
+
+  const updateWeightMutation = useMutation({
+    mutationFn: ({ id, weight }) => localApi.updateExercise(id, { weight: weight || null }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["exercises", workoutId] });
+    },
+  });
+
   const finishWorkoutMutation = useMutation({
     mutationFn: async () => {
       if (!session) {
@@ -95,11 +129,12 @@ export default function ActiveWorkout() {
       
       const exercisesData = completedExercises.map(exId => {
         const ex = exercises.find(e => e.id === exId);
+        const weightUsed = weightOverrides[exId] ?? ex?.weight ?? null;
         return {
           exercise_id: exId,
           exercise_name: ex?.name,
           sets_completed: ex?.sets,
-          weight_used: ex?.weight
+          weight_used: weightUsed
         };
       });
 
@@ -140,6 +175,23 @@ export default function ActiveWorkout() {
     ? Math.round((completedExercises.length / exercises.length) * 100)
     : 0;
 
+  const hasMethodGroups = ["bi-set", "tri-set", "circuito"].includes(workout?.training_method || "");
+  const groupedExercises = hasMethodGroups
+    ? (() => {
+        const groups = {};
+        exercises.forEach((ex) => {
+          const g = ex.method_group ?? 0;
+          if (!groups[g]) groups[g] = [];
+          groups[g].push(ex);
+        });
+        return Object.keys(groups).map(Number).sort((a, b) => a - b).map((gKey) => ({
+          key: gKey,
+          label: gKey === 0 ? null : `Grupo ${gKey}`,
+          exercises: groups[gKey],
+        }));
+      })()
+    : [{ key: 0, label: null, exercises }];
+
   if (loadingWorkout || loadingExercises) {
     return (
       <div className="min-h-screen bg-zinc-950 text-white p-5">
@@ -173,7 +225,14 @@ export default function ActiveWorkout() {
           </div>
 
           <div>
-            <h1 className="text-xl font-bold">{workout?.name}</h1>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-xl font-bold">{workout?.name}</h1>
+              {hasMethodGroups && (
+                <span className="px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-400 text-xs font-medium">
+                  {workout?.training_method === "bi-set" ? "Bi-set" : workout?.training_method === "tri-set" ? "Tri-set" : "Circuito"}
+                </span>
+              )}
+            </div>
             <p className="text-zinc-400 text-sm">
               {completedExercises.length} de {exercises.length} exercícios
             </p>
@@ -192,15 +251,57 @@ export default function ActiveWorkout() {
 
       {/* Exercises */}
       <div className="px-5 py-6 space-y-4">
-        {exercises.map((exercise, index) => (
-          <ExerciseCard
-            key={exercise.id}
-            exercise={exercise}
-            index={index}
-            isCompleted={completedExercises.includes(exercise.id)}
-            onComplete={handleCompleteExercise}
-          />
-        ))}
+        {groupedExercises.map((group, groupIndex) => {
+          const isCombinedGroup = !!group.label;
+          const groupIds = group.exercises.map((e) => e.id);
+          const groupAllComplete = isCombinedGroup && groupIds.every((id) => completedExercises.includes(id));
+          return (
+            <div key={group.key} className="space-y-3">
+              {group.label && (
+                <div className="px-3 py-2 rounded-lg bg-yellow-500/15 border border-yellow-500/30 text-yellow-400 text-sm font-medium">
+                  {group.label} — executar combinadamente
+                </div>
+              )}
+              {group.exercises.map((exercise, idx) => {
+                const globalIndex = groupedExercises.slice(0, groupIndex).reduce((acc, g) => acc + g.exercises.length, 0) + idx;
+                return (
+                  <ExerciseCard
+                    key={exercise.id}
+                    exercise={exercise}
+                    index={globalIndex}
+                    isCompleted={completedExercises.includes(exercise.id)}
+                    onComplete={handleCompleteExercise}
+                    hideCompleteButton={isCombinedGroup}
+                    weightOverride={weightOverrides[exercise.id]}
+                    onWeightChange={handleWeightChange}
+                  />
+                );
+              })}
+              {isCombinedGroup && (
+                <Button
+                  onClick={() => handleCompleteGroup(group.exercises)}
+                  className={`w-full rounded-xl h-12 font-semibold ${
+                    groupAllComplete
+                      ? "bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30"
+                      : "bg-yellow-500 hover:bg-yellow-600 text-black"
+                  }`}
+                >
+                  {groupAllComplete ? (
+                    <>
+                      <CheckCircle2 className="w-5 h-5 mr-2" />
+                      Grupo concluído
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-5 h-5 mr-2" />
+                      Concluir grupo
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {/* Finish Button */}
@@ -230,9 +331,8 @@ export default function ActiveWorkout() {
           </DialogHeader>
           <div className="flex gap-3 mt-4">
             <Button
-              variant="outline"
               onClick={() => setShowFinishDialog(false)}
-              className="flex-1 border-zinc-700 text-white hover:bg-zinc-800"
+              className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-black"
             >
               Voltar
             </Button>
@@ -261,9 +361,8 @@ export default function ActiveWorkout() {
           </DialogHeader>
           <div className="flex gap-3 mt-4">
             <Button
-              variant="outline"
               onClick={() => setShowCancelDialog(false)}
-              className="flex-1 border-zinc-700 text-white hover:bg-zinc-800"
+              className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-black"
             >
               Continuar treino
             </Button>

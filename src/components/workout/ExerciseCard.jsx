@@ -1,12 +1,21 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Play, Pause, Check, Weight, Repeat, Timer, ChevronDown, ChevronUp, X } from "lucide-react";
+import { Play, Check, Weight, Repeat, Timer, ChevronDown, ChevronUp, X, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { parseWeightForInput, formatWeightDisplay } from "@/utils";
 
-export default function ExerciseCard({ exercise, index, onComplete, isCompleted }) {
+export default function ExerciseCard({ exercise, index, onComplete, isCompleted, hideCompleteButton = false, weightOverride, onWeightChange }) {
   const [expanded, setExpanded] = useState(false);
   const [videoOpen, setVideoOpen] = useState(false);
+  const [weightDialogOpen, setWeightDialogOpen] = useState(false);
+  const [weightInput, setWeightInput] = useState("");
+
+  const rawWeight = weightOverride !== undefined ? weightOverride : exercise.weight;
+  const displayWeight = formatWeightDisplay(rawWeight);
+  const canEditWeight = typeof onWeightChange === "function";
 
   return (
     <>
@@ -75,10 +84,21 @@ export default function ExerciseCard({ exercise, index, onComplete, isCompleted 
               <p className="text-xs text-zinc-500">Repetições</p>
               <p className="text-lg font-bold text-white">{exercise.reps}</p>
             </div>
-            <div className="bg-zinc-800/50 rounded-xl p-3 text-center">
+            <div
+              className={`bg-zinc-800/50 rounded-xl p-3 text-center ${canEditWeight ? "cursor-pointer hover:bg-zinc-700/50 transition-colors relative group" : ""}`}
+              onClick={canEditWeight ? () => {
+                setWeightInput(parseWeightForInput(weightOverride ?? exercise.weight));
+                setWeightDialogOpen(true);
+              } : undefined}
+            >
               <Weight className="w-4 h-4 text-yellow-400 mx-auto mb-1" />
               <p className="text-xs text-zinc-500">Carga</p>
-              <p className="text-lg font-bold text-white">{exercise.weight || "-"}</p>
+              <div className="flex items-center justify-center gap-1">
+                <p className="text-lg font-bold text-white">{displayWeight}</p>
+                {canEditWeight && (
+                  <Pencil className="w-3.5 h-3.5 text-zinc-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                )}
+              </div>
             </div>
           </div>
 
@@ -116,26 +136,64 @@ export default function ExerciseCard({ exercise, index, onComplete, isCompleted 
             )}
           </AnimatePresence>
 
-          {/* Complete Button */}
-          <Button
-            onClick={() => onComplete(exercise)}
-            className={`w-full mt-4 rounded-xl h-12 font-semibold transition-all ${
-              isCompleted
-                ? "bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30"
-                : "bg-yellow-500 hover:bg-yellow-600 text-black"
-            }`}
-          >
-            {isCompleted ? (
-              <>
-                <Check className="w-5 h-5 mr-2" />
-                Concluído
-              </>
-            ) : (
-              "Marcar como concluído"
-            )}
-          </Button>
+          {/* Complete Button - oculto quando é grupo combinado */}
+          {!hideCompleteButton && (
+            <Button
+              onClick={() => onComplete(exercise)}
+              className={`w-full mt-4 rounded-xl h-12 font-semibold transition-all ${
+                isCompleted
+                  ? "bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30"
+                  : "bg-yellow-500 hover:bg-yellow-600 text-black"
+              }`}
+            >
+              {isCompleted ? (
+                <>
+                  <Check className="w-5 h-5 mr-2" />
+                  Concluído
+                </>
+              ) : (
+                "Marcar como concluído"
+              )}
+            </Button>
+          )}
         </div>
       </motion.div>
+
+      {/* Weight Edit Dialog */}
+      <Dialog open={weightDialogOpen} onOpenChange={(open) => {
+        if (!open) setWeightDialogOpen(false);
+      }}>
+        <DialogContent className="bg-zinc-900 border-zinc-800 text-white">
+          <DialogTitle className="text-lg">Carga — {exercise.name}</DialogTitle>
+          <div className="space-y-4 mt-4">
+            <div>
+              <Label className="text-zinc-400">Carga (kg)</Label>
+              <div className="flex items-center gap-2 mt-1">
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  placeholder="Ex: 30"
+                  value={weightInput}
+                  onChange={(e) => setWeightInput(e.target.value)}
+                  className="bg-zinc-800 border-zinc-700"
+                />
+                <span className="text-zinc-400 font-medium">kg</span>
+              </div>
+            </div>
+            <Button
+              onClick={() => {
+                const value = weightInput.trim();
+                onWeightChange?.(exercise.id, value || null);
+                setWeightDialogOpen(false);
+              }}
+              className="w-full bg-yellow-500 hover:bg-yellow-600 text-black"
+            >
+              Salvar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Video Dialog */}
       <Dialog open={videoOpen} onOpenChange={setVideoOpen}>

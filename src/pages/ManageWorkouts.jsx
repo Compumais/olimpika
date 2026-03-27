@@ -20,9 +20,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { localApi } from "@/api/localApiClient";
+import { useAuth } from "@/lib/AuthContext";
 
 export default function ManageWorkouts() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isAluno = user?.user_type === "aluno";
+
   const [showDialog, setShowDialog] = useState(false);
   const [editingWorkout, setEditingWorkout] = useState(null);
   const [formData, setFormData] = useState({
@@ -34,8 +38,14 @@ export default function ManageWorkouts() {
   });
 
   const { data: workouts = [], isLoading } = useQuery({
-    queryKey: ['workouts'],
-    queryFn: () => localApi.getWorkouts()
+    queryKey: ['workouts', user?.user_type, user?.student_id],
+    queryFn: () => {
+      if (isAluno && user?.student_id) {
+        return localApi.getWorkouts({ student_id: user.student_id });
+      }
+      return localApi.getWorkouts();
+    },
+    enabled: !!user,
   });
 
   const createMutation = useMutation({
@@ -126,13 +136,15 @@ export default function ManageWorkouts() {
             </Link>
             <h1 className="text-xl font-bold">Gerenciar Treinos</h1>
           </div>
-          <Button
-            onClick={() => handleOpenDialog()}
-            className="bg-yellow-500 hover:bg-yellow-600 text-black"
-          >
-            <Plus className="w-5 h-5 mr-1" />
-            Novo
-          </Button>
+          {!isAluno && (
+            <Button
+              onClick={() => handleOpenDialog()}
+              className="bg-yellow-500 hover:bg-yellow-600 text-black"
+            >
+              <Plus className="w-5 h-5 mr-1" />
+              Novo
+            </Button>
+          )}
         </div>
       </div>
 
@@ -148,8 +160,10 @@ export default function ManageWorkouts() {
             <div className="w-20 h-20 rounded-full bg-zinc-800 flex items-center justify-center mx-auto mb-4">
               <Dumbbell className="w-10 h-10 text-zinc-600" />
             </div>
-            <h3 className="text-lg font-semibold mb-2">Nenhum treino cadastrado</h3>
-            <p className="text-zinc-500 mb-6">Crie seu primeiro treino para começar</p>
+            <h3 className="text-lg font-semibold mb-2">Nenhum treino</h3>
+            <p className="text-zinc-500 mb-6">
+              {isAluno ? "Seu personal ainda não cadastrou treinos para você." : "Crie seu primeiro treino para começar"}
+            </p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -185,22 +199,26 @@ export default function ManageWorkouts() {
                         <Dumbbell className="w-4 h-4" />
                       </Button>
                     </Link>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => handleOpenDialog(workout)}
-                      className="text-white hover:bg-white/20"
-                    >
-                      <Edit className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => deleteMutation.mutate(workout.id)}
-                      className="text-white hover:bg-red-500/50"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                    {!isAluno && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleOpenDialog(workout)}
+                          className="text-white hover:bg-white/20"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => deleteMutation.mutate(workout.id)}
+                          className="text-white hover:bg-red-500/50"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
               </motion.div>
