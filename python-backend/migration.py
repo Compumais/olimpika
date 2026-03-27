@@ -204,30 +204,6 @@ MIGRATIONS: List[Tuple[str, str, List[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_student_template_assignments_template_id ON student_template_assignments(template_id);",
         ],
     ),
-    (
-        "003",
-        "add_expires_at_to_workouts_and_assignments",
-        [
-            "ALTER TABLE workouts ADD COLUMN IF NOT EXISTS expires_at TEXT;",
-            "ALTER TABLE student_template_assignments ADD COLUMN IF NOT EXISTS expires_at TEXT;",
-        ],
-    ),
-    (
-        "004",
-        "add_training_method_to_workouts",
-        [
-            "ALTER TABLE workouts ADD COLUMN IF NOT EXISTS training_method TEXT;",
-            "ALTER TABLE workout_templates ADD COLUMN IF NOT EXISTS training_method TEXT;",
-        ],
-    ),
-    (
-        "005",
-        "add_method_group_to_exercises",
-        [
-            "ALTER TABLE exercises ADD COLUMN IF NOT EXISTS method_group INTEGER;",
-            "ALTER TABLE template_exercises ADD COLUMN IF NOT EXISTS method_group INTEGER;",
-        ],
-    ),
 ]
 
 

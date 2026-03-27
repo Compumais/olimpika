@@ -9,10 +9,7 @@ import {
   User,
   ChevronRight,
   Search,
-  Dumbbell,
-  UserCircle,
-  Calendar,
-  UserPlus
+  Dumbbell
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,19 +41,6 @@ export default function ManageStudents() {
   });
 
   const [createError, setCreateError] = useState("");
-  const [adoptError, setAdoptError] = useState("");
-
-  const adoptMutation = useMutation({
-    mutationFn: (studentId) =>
-      localApi.updateStudent(studentId, { personal_trainer_email: user?.email ?? "" }),
-    onSuccess: async () => {
-      await queryClient.refetchQueries({ queryKey: ['students'] });
-      setAdoptError("");
-    },
-    onError: (err) => {
-      setAdoptError(err?.message ?? "Erro ao adotar aluno.");
-    }
-  });
 
   const createMutation = useMutation({
     mutationFn: (data) =>
@@ -95,16 +79,6 @@ export default function ManageStudents() {
   const filteredStudents = students.filter(student => 
     student.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
-
-  const formatDate = (iso) => {
-    if (!iso) return null;
-    try {
-      const d = new Date(iso);
-      return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
-    } catch {
-      return iso;
-    }
-  };
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white pb-24">
@@ -145,12 +119,6 @@ export default function ManageStudents() {
         </div>
       </div>
 
-      {adoptError && (
-        <div className="mx-4 mb-2 p-3 rounded-lg bg-red-900/30 border border-red-800 text-red-400 text-sm">
-          {adoptError}
-        </div>
-      )}
-
       {/* Students List */}
       <div className="px-4">
         {isLoading ? (
@@ -176,89 +144,49 @@ export default function ManageStudents() {
           </div>
         ) : (
           <div className="grid gap-3">
-            {filteredStudents.map((student, index) => {
-              const isAdoptedByMe = student.personal_trainer_email === user?.email;
-              return (
-                <motion.div
-                  key={student.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.05 }}
-                  onClick={() => isAdoptedByMe && navigate(createPageUrl('StudentWorkouts') + `?student_id=${student.id}&student_name=${encodeURIComponent(student.name)}`)}
-                  className={`bg-zinc-900/50 rounded-xl border border-zinc-800 p-4 transition-all ${
-                    isAdoptedByMe ? "hover:bg-zinc-800/50 cursor-pointer" : "cursor-default"
-                  }`}
-                >
-                  <div className="flex items-center gap-4">
-                    {/* Avatar */}
-                    <div className="w-14 h-14 rounded-full bg-yellow-500/20 border-2 border-yellow-500/30 flex items-center justify-center flex-shrink-0">
-                      <User className="w-7 h-7 text-yellow-400" />
-                    </div>
+            {filteredStudents.map((student, index) => (
+              <motion.div
+                key={student.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.05 }}
+                onClick={() => navigate(createPageUrl('StudentWorkouts') + `?student_id=${student.id}&student_name=${encodeURIComponent(student.name)}`)}
+                className="bg-zinc-900/50 rounded-xl border border-zinc-800 p-4 hover:bg-zinc-800/50 cursor-pointer transition-all"
+              >
+                <div className="flex items-center gap-4">
+                  {/* Avatar */}
+                  <div className="w-14 h-14 rounded-full bg-yellow-500/20 border-2 border-yellow-500/30 flex items-center justify-center flex-shrink-0">
+                    <User className="w-7 h-7 text-yellow-400" />
+                  </div>
 
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-white text-lg">{student.name}</h3>
-                      {student.goal && (
-                        <p className="text-sm text-yellow-400">{student.goal}</p>
-                      )}
-                      <div className="flex gap-3 text-xs text-zinc-500 mt-1">
-                        {student.email && <span>{student.email}</span>}
-                        {student.phone && (
-                          <>
-                            {student.email && <span>•</span>}
-                            <span>{student.phone}</span>
-                          </>
-                        )}
-                      </div>
-                      {(student.workout_assigned_by || student.next_expires_at) && isAdoptedByMe && (
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-400 mt-2">
-                          {student.workout_assigned_by && (
-                            <span className="flex items-center gap-1">
-                              <UserCircle className="w-3.5 h-3.5" />
-                              Personal: {student.workout_assigned_by}
-                            </span>
-                          )}
-                          {student.next_expires_at && (
-                            <span className="flex items-center gap-1">
-                              <Calendar className="w-3.5 h-3.5" />
-                              Renovar em: {formatDate(student.next_expires_at)}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                      {!isAdoptedByMe && student.personal_trainer_email && (
-                        <p className="text-xs text-zinc-500 mt-2">
-                          Adotado por outro personal
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex items-center gap-2">
-                      {isAdoptedByMe ? (
-                        <div className="text-center">
-                          <Dumbbell className="w-5 h-5 text-zinc-500 mx-auto" />
-                          <span className="text-xs text-zinc-500">Treinos</span>
-                          <ChevronRight className="w-5 h-5 text-zinc-600 ml-1" />
-                        </div>
-                      ) : (
-                        <Button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            adoptMutation.mutate(student.id);
-                          }}
-                          disabled={adoptMutation.isPending}
-                          className="bg-yellow-500 hover:bg-yellow-600 text-black"
-                        >
-                          <UserPlus className="w-4 h-4 mr-2" />
-                          {adoptMutation.isPending ? "Adotando..." : "Adotar aluno"}
-                        </Button>
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-semibold text-white text-lg">{student.name}</h3>
+                    {student.goal && (
+                      <p className="text-sm text-yellow-400">{student.goal}</p>
+                    )}
+                    <div className="flex gap-3 text-xs text-zinc-500 mt-1">
+                      {student.email && <span>{student.email}</span>}
+                      {student.phone && (
+                        <>
+                          {student.email && <span>•</span>}
+                          <span>{student.phone}</span>
+                        </>
                       )}
                     </div>
                   </div>
-                </motion.div>
-              );
-            })}
+
+                  {/* Arrow */}
+                  <div className="flex items-center gap-2">
+                    <div className="text-center">
+                      <Dumbbell className="w-5 h-5 text-zinc-500 mx-auto" />
+                      <span className="text-xs text-zinc-500">Treinos</span>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-zinc-600" />
+                  </div>
+                </div>
+              </motion.div>
+            ))}
           </div>
         )}
       </div>
@@ -329,8 +257,9 @@ export default function ManageStudents() {
 
           <DialogFooter>
             <Button
+              variant="outline"
               onClick={handleCloseDialog}
-              className="bg-yellow-500 hover:bg-yellow-600 text-black"
+              className="border-zinc-700 text-white"
             >
               Cancelar
             </Button>

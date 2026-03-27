@@ -178,11 +178,10 @@ export const localApi = {
     return apiDelete(`/workout-templates/${templateId}/exercises/${exerciseId}`, actorToPayload(actor));
   },
 
-  async assignWorkoutTemplate(studentId, templateId, actor, notes = '', expiresAt = '') {
+  async assignWorkoutTemplate(studentId, templateId, actor, notes = '') {
     return apiPost(`/students/${studentId}/template-assignments`, {
       template_id: templateId,
       notes,
-      expires_at: expiresAt || undefined,
       ...actorToPayload(actor),
     });
   },
@@ -218,21 +217,12 @@ export const localApi = {
   },
 
   // Students -----------------------------------------------------------------
-  async getStudents(params = {}) {
-    const merged = { ...params, with_workout_summary: true };
-    return apiGet('/students', merged);
+  async getStudents(params) {
+    return apiGet('/students', params ?? {});
   },
 
   async createStudent(data) {
     return apiPost('/students', data);
-  },
-
-  async getStudent(id) {
-    return apiGet(`/students/${id}`);
-  },
-
-  async updateStudent(id, data) {
-    return apiPut(`/students/${id}`, data);
   },
 };
 

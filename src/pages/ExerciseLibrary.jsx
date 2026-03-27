@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { createPageUrl, parseWeightForInput, formatWeightDisplay } from "@/utils";
+import { createPageUrl } from "@/utils";
 import { motion } from "framer-motion";
 import { 
   ArrowLeft, 
@@ -79,7 +79,7 @@ export default function ExerciseLibrary() {
         muscle_group: exercise.muscle_group || "Peito",
         sets: exercise.sets || 3,
         reps: exercise.reps || "12",
-        weight: parseWeightForInput(exercise.weight) || "",
+        weight: exercise.weight || "",
         rest_seconds: exercise.rest_seconds || 60
       });
     } else {
@@ -241,10 +241,10 @@ export default function ExerciseLibrary() {
                       <span>{exercise.sets} séries</span>
                       <span>•</span>
                       <span>{exercise.reps} reps</span>
-                      {(exercise.weight != null && exercise.weight !== "") && (
+                      {exercise.weight && (
                         <>
                           <span>•</span>
-                          <span>{formatWeightDisplay(exercise.weight)}</span>
+                          <span>{exercise.weight}</span>
                         </>
                       )}
                     </div>
@@ -336,19 +336,13 @@ export default function ExerciseLibrary() {
                 />
               </div>
               <div>
-                <Label>Carga (kg)</Label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.5"
-                    value={formData.weight}
-                    onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
-                    placeholder="Ex: 40"
-                    className="bg-zinc-800 border-zinc-700 text-white"
-                  />
-                  <span className="text-zinc-400 font-medium">kg</span>
-                </div>
+                <Label>Carga</Label>
+                <Input
+                  value={formData.weight}
+                  onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
+                  placeholder="Ex: 40kg"
+                  className="bg-zinc-800 border-zinc-700 text-white"
+                />
               </div>
             </div>
 
@@ -392,8 +386,9 @@ export default function ExerciseLibrary() {
 
           <DialogFooter>
             <Button
+              variant="outline"
               onClick={handleCloseDialog}
-              className="bg-yellow-500 hover:bg-yellow-600 text-black"
+              className="border-zinc-700 text-white"
             >
               Cancelar
             </Button>

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { createPageUrl, parseWeightForInput, formatWeightDisplay } from "@/utils";
+import { createPageUrl } from "@/utils";
 import { motion, Reorder } from "framer-motion";
 import { 
   ArrowLeft, 
@@ -20,16 +20,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { localApi } from "@/api/localApiClient";
-import { useAuth } from "@/lib/AuthContext";
 
 export default function ManageExercises() {
   const queryClient = useQueryClient();
-  const { user } = useAuth();
-  const isAluno = user?.user_type === "aluno";
-
   const urlParams = new URLSearchParams(window.location.search);
   const workoutId = urlParams.get('workout_id');
-  const isTemplateWorkout = workoutId?.startsWith?.("template:");
 
   const [showDialog, setShowDialog] = useState(false);
   const [showLibraryDialog, setShowLibraryDialog] = useState(false);
@@ -43,20 +38,14 @@ export default function ManageExercises() {
     sets: '',
     reps: '',
     weight: '',
-    rest_seconds: '',
-    method_group: ''
+    rest_seconds: ''
   });
-  const [weightDialogOpen, setWeightDialogOpen] = useState(false);
-  const [editingWeightExercise, setEditingWeightExercise] = useState(null);
-  const [weightValue, setWeightValue] = useState("");
 
   const { data: workout } = useQuery({
     queryKey: ['workout', workoutId],
     queryFn: () => workoutId ? localApi.getWorkoutById(workoutId) : null,
     enabled: !!workoutId
   });
-
-  const hasMethodGroups = ['bi-set', 'tri-set', 'circuito'].includes(workout?.training_method || '');
 
   const { data: exercises = [], isLoading } = useQuery({
     queryKey: ['exercises', workoutId],
@@ -92,17 +81,6 @@ export default function ManageExercises() {
     }
   });
 
-  const updateWeightMutation = useMutation({
-    mutationFn: ({ id, weight }) => localApi.updateExercise(id, { weight: weight || null }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['exercises'] });
-      queryClient.invalidateQueries({ queryKey: ['exercises', workoutId] });
-      setWeightDialogOpen(false);
-      setEditingWeightExercise(null);
-      setWeightValue("");
-    }
-  });
-
   const addFromLibraryMutation = useMutation({
     mutationFn: (templateExercise) => {
       if (!workoutId) {
@@ -116,7 +94,7 @@ export default function ManageExercises() {
         video_url: templateExercise.video_url ?? '',
         sets: String(templateExercise.sets ?? 3),
         reps: String(templateExercise.reps ?? '12'),
-        weight: parseWeightForInput(templateExercise.weight) || '',
+        weight: String(templateExercise.weight ?? ''),
         rest_seconds: String(templateExercise.rest_seconds ?? 60),
         muscle_group: templateExercise.muscle_group ?? '',
         order: exercises.length,
@@ -145,9 +123,8 @@ export default function ManageExercises() {
         video_url: exercise.video_url || '',
         sets: exercise.sets?.toString() || '',
         reps: exercise.reps || '',
-        weight: parseWeightForInput(exercise.weight) || '',
-        rest_seconds: exercise.rest_seconds?.toString() || '',
-        method_group: exercise.method_group != null ? String(exercise.method_group) : ''
+        weight: exercise.weight || '',
+        rest_seconds: exercise.rest_seconds?.toString() || ''
       });
     } else {
       setEditingExercise(null);
@@ -159,8 +136,7 @@ export default function ManageExercises() {
         sets: '',
         reps: '',
         weight: '',
-        rest_seconds: '',
-        method_group: ''
+        rest_seconds: ''
       });
     }
     setShowDialog(true);
@@ -184,9 +160,6 @@ export default function ManageExercises() {
       rest_seconds: formData.rest_seconds ? parseInt(formData.rest_seconds) : null,
       order: editingExercise?.order ?? exercises.length
     };
-    if (hasMethodGroups) {
-      data.method_group = formData.method_group ? parseInt(formData.method_group, 10) : null;
-    }
 
     if (editingExercise) {
       updateMutation.mutate({ id: editingExercise.id, data });
@@ -208,27 +181,18 @@ export default function ManageExercises() {
             </Link>
             <div>
               <h1 className="text-xl font-bold">Exercícios</h1>
-              <div className="flex items-center gap-2 flex-wrap">
-                <p className="text-zinc-500 text-sm">{workout?.name}</p>
-                {hasMethodGroups && (
-                  <span className="px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-400 text-xs font-medium">
-                    {workout?.training_method === 'bi-set' ? 'Bi-set' : workout?.training_method === 'tri-set' ? 'Tri-set' : 'Circuito'}
-                  </span>
-                )}
-              </div>
+              <p className="text-zinc-500 text-sm">{workout?.name}</p>
             </div>
           </div>
-          {!isAluno && (
-            <div className="flex gap-2">
-              <Button
-                onClick={() => setShowLibraryDialog(true)}
-                className="bg-yellow-500 hover:bg-yellow-600 text-black"
-              >
-                <Plus className="w-5 h-5 mr-1" />
-                Da Biblioteca
-              </Button>
-            </div>
-          )}
+          <div className="flex gap-2">
+            <Button
+              onClick={() => setShowLibraryDialog(true)}
+              className="bg-yellow-500 hover:bg-yellow-600 text-black"
+            >
+              <Plus className="w-5 h-5 mr-1" />
+              Da Biblioteca
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -245,108 +209,77 @@ export default function ManageExercises() {
               <Weight className="w-10 h-10 text-zinc-600" />
             </div>
             <h3 className="text-lg font-semibold mb-2">Nenhum exercício cadastrado</h3>
-            <p className="text-zinc-500 mb-6">
-              {isAluno ? "Não há exercícios neste treino." : "Adicione exercícios a este treino"}
-            </p>
+            <p className="text-zinc-500 mb-6">Adicione exercícios a este treino</p>
           </div>
         ) : (
-          <div className="space-y-4">
-            {(() => {
-              const renderExercise = (exercise, index, showGroupBadge) => (
-                <motion.div
-                  key={exercise.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.05 }}
-                  className="bg-zinc-900/50 rounded-xl border border-zinc-800 overflow-hidden"
-                >
-                  <div className="flex">
-                    <div className="w-24 h-24 bg-zinc-800 flex-shrink-0">
-                      {exercise.image_url ? (
-                        <img src={exercise.image_url} alt={exercise.name} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <Weight className="w-8 h-8 text-zinc-700" />
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex-1 p-3 flex items-center gap-3">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          {showGroupBadge && exercise.method_group && (
-                            <span className="px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-400 text-xs">Grupo {exercise.method_group}</span>
-                          )}
-                          <span className="text-yellow-400 text-sm font-bold">#{index + 1}</span>
-                          <h3 className="font-semibold text-white">{exercise.name}</h3>
-                        </div>
-                        <div className="flex items-center gap-3 text-zinc-500 text-sm">
-                          <span>{exercise.sets} séries</span>
-                          <span>×</span>
-                          <span>{exercise.reps} reps</span>
-                          {exercise.weight != null && exercise.weight !== "" && <><span>•</span><span>{formatWeightDisplay(exercise.weight)}</span></>}
-                        </div>
+          <div className="space-y-3">
+            {exercises.map((exercise, index) => (
+              <motion.div
+                key={exercise.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.05 }}
+                className="bg-zinc-900/50 rounded-xl border border-zinc-800 overflow-hidden"
+              >
+                <div className="flex">
+                  {/* Image */}
+                  <div className="w-24 h-24 bg-zinc-800 flex-shrink-0">
+                    {exercise.image_url ? (
+                      <img 
+                        src={exercise.image_url} 
+                        alt={exercise.name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <Weight className="w-8 h-8 text-zinc-700" />
                       </div>
-                      <div className="flex gap-1">
-                        {isAluno && !isTemplateWorkout ? (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              setEditingWeightExercise(exercise);
-                              setWeightValue(parseWeightForInput(exercise.weight));
-                              setWeightDialogOpen(true);
-                            }}
-                            className="text-zinc-400 hover:text-white hover:bg-zinc-800"
-                          >
-                            <Weight className="w-4 h-4 mr-1" />
-                            Carga
-                          </Button>
-                        ) : !isAluno && (
+                    )}
+                  </div>
+
+                  {/* Content */}
+                  <div className="flex-1 p-3 flex items-center gap-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-yellow-400 text-sm font-bold">#{index + 1}</span>
+                        <h3 className="font-semibold text-white">{exercise.name}</h3>
+                      </div>
+                      <div className="flex items-center gap-3 text-zinc-500 text-sm">
+                        <span>{exercise.sets} séries</span>
+                        <span>×</span>
+                        <span>{exercise.reps} reps</span>
+                        {exercise.weight && (
                           <>
-                            <Button size="sm" variant="ghost" onClick={() => handleOpenDialog(exercise)} className="text-zinc-400 hover:text-white hover:bg-zinc-800">
-                              <Edit className="w-4 h-4" />
-                            </Button>
-                            <Button size="sm" variant="ghost" onClick={() => deleteMutation.mutate(exercise.id)} className="text-zinc-400 hover:text-red-400 hover:bg-red-500/10">
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
+                            <span>•</span>
+                            <span>{exercise.weight}</span>
                           </>
                         )}
-                        {isAluno && isTemplateWorkout && (
-                          <span className="text-xs text-zinc-500">Carga definida pelo personal</span>
-                        )}
                       </div>
                     </div>
-                  </div>
-                </motion.div>
-              );
 
-              if (!hasMethodGroups) {
-                return exercises.map((ex, i) => renderExercise(ex, i, false));
-              }
-              const groups = {};
-              exercises.forEach((ex) => {
-                const g = ex.method_group ?? 0;
-                if (!groups[g]) groups[g] = [];
-                groups[g].push(ex);
-              });
-              const sortedGroups = Object.keys(groups).map(Number).sort((a, b) => a - b);
-              let globalIndex = 0;
-              const methodLabel = workout?.training_method === 'bi-set' ? 'Bi-set' : workout?.training_method === 'tri-set' ? 'Tri-set' : 'Circuito';
-              return sortedGroups.map((gKey) => {
-                const groupExercises = groups[gKey];
-                const groupHeader = gKey === 0 ? null : (
-                  <div className="px-3 py-2 rounded-lg bg-yellow-500/15 border border-yellow-500/30 text-yellow-400 text-sm font-medium">
-                    Grupo {gKey} ({methodLabel}) — executar combinadamente
+                    {/* Actions */}
+                    <div className="flex gap-1">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleOpenDialog(exercise)}
+                        className="text-zinc-400 hover:text-white hover:bg-zinc-800"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => deleteMutation.mutate(exercise.id)}
+                        className="text-zinc-400 hover:text-red-400 hover:bg-red-500/10"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
                   </div>
-                );
-                return (
-                  <div key={gKey} className="space-y-2">
-                    {groupHeader}
-                    {groupExercises.map((exercise) => renderExercise(exercise, globalIndex++, true))}
-                  </div>
-                );
-              });
-            })()}
+                </div>
+              </motion.div>
+            ))}
           </div>
         )}
       </div>
@@ -421,19 +354,13 @@ export default function ManageExercises() {
                 />
               </div>
               <div>
-                <Label className="text-zinc-400">Carga (kg)</Label>
-                <div className="flex items-center gap-2 mt-1">
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.5"
-                    placeholder="Ex: 30"
-                    value={formData.weight}
-                    onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
-                    className="bg-zinc-800 border-zinc-700"
-                  />
-                  <span className="text-zinc-400 font-medium">kg</span>
-                </div>
+                <Label className="text-zinc-400">Carga</Label>
+                <Input
+                  placeholder="Ex: 30kg"
+                  value={formData.weight}
+                  onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
+                  className="bg-zinc-800 border-zinc-700 mt-1"
+                />
               </div>
             </div>
 
@@ -448,70 +375,12 @@ export default function ManageExercises() {
               />
             </div>
 
-            {hasMethodGroups && (
-              <div>
-                <Label className="text-zinc-400">Grupo (executar combinadamente)</Label>
-                <select
-                  value={formData.method_group}
-                  onChange={(e) => setFormData({ ...formData, method_group: e.target.value })}
-                  className="mt-1 w-full h-10 rounded-md bg-zinc-800 border border-zinc-700 px-3 text-white"
-                >
-                  <option value="">— Nenhum</option>
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((g) => (
-                    <option key={g} value={g}>Grupo {g}</option>
-                  ))}
-                </select>
-                <p className="text-xs text-zinc-500 mt-1">
-                  Exercícios no mesmo grupo são feitos combinadamente ({workout?.training_method === 'bi-set' ? '2 juntos' : workout?.training_method === 'tri-set' ? '3 juntos' : 'em sequência'})
-                </p>
-              </div>
-            )}
-
             <Button
               onClick={handleSubmit}
               disabled={createMutation.isPending || updateMutation.isPending || !formData.name}
               className="w-full bg-yellow-500 hover:bg-yellow-600 text-black"
             >
               {createMutation.isPending || updateMutation.isPending ? "Salvando..." : "Salvar"}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Weight-only Dialog (for aluno) */}
-      <Dialog open={weightDialogOpen} onOpenChange={(open) => {
-        if (!open) {
-          setWeightDialogOpen(false);
-          setEditingWeightExercise(null);
-          setWeightValue("");
-        }
-      }}>
-        <DialogContent className="bg-zinc-900 border-zinc-800 text-white">
-          <DialogHeader>
-            <DialogTitle>Editar carga — {editingWeightExercise?.name}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 mt-4">
-            <div>
-              <Label className="text-zinc-400">Carga (kg)</Label>
-              <div className="flex items-center gap-2 mt-1">
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.5"
-                  placeholder="Ex: 30"
-                  value={weightValue}
-                  onChange={(e) => setWeightValue(e.target.value)}
-                  className="bg-zinc-800 border-zinc-700"
-                />
-                <span className="text-zinc-400 font-medium">kg</span>
-              </div>
-            </div>
-            <Button
-              onClick={() => editingWeightExercise && updateWeightMutation.mutate({ id: editingWeightExercise.id, weight: weightValue.trim() || null })}
-              disabled={updateWeightMutation.isPending}
-              className="w-full bg-yellow-500 hover:bg-yellow-600 text-black"
-            >
-              {updateWeightMutation.isPending ? "Salvando..." : "Salvar"}
             </Button>
           </div>
         </DialogContent>
@@ -563,7 +432,7 @@ export default function ManageExercises() {
                         <h4 className="font-semibold text-white">{exercise.name}</h4>
                         <p className="text-xs text-yellow-400">{exercise.muscle_group}</p>
                         <p className="text-xs text-zinc-500 mt-1">
-                          {exercise.sets} × {exercise.reps} {exercise.weight != null && exercise.weight !== "" && `• ${formatWeightDisplay(exercise.weight)}`}
+                          {exercise.sets} × {exercise.reps} {exercise.weight && `• ${exercise.weight}`}
                         </p>
                       </div>
                       <Button
